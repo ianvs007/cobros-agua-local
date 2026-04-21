@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --color-marine: #0047AB;
+  --color-marine-light: #1B65D5;
+  --color-marine-dark: #003087;
+  --color-water-blank: #D9EAF7;
+}
+
+/* Clases de Emergencia para asegurar visibilidad en Sidebar */
+.sidebar-bg-marine {
+  background-color: #0047AB !important;
+}
+
+.text-sidebar-inactive {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.text-sidebar-active {
+  color: #0047AB !important;
+}
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--color-water-blank);
+  color: #0F172A;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+}
+
+/* Custom Scrollbar Hídrico */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #E2E8F0;
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #CBD5E1;
+}

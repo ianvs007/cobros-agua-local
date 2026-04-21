@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /d/software/MisProyectos/cobros_agua/*.sql)",
+      "Bash(npx vite:*)",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "Bash(cp -r \"D:/software/MisProyectos/cobros_agua\" \"D:/software/MisProyectos/cobros_agua_local\")",
+      "Bash(rm -rf \"D:/software/MisProyectos/cobros_agua_local/.git\" \"D:/software/MisProyectos/cobros_agua_local/node_modules\" \"D:/software/MisProyectos/cobros_agua_local/dist\")"
+    ]
+  }
+}
