@@ -2,9 +2,9 @@
 setlocal enabledelayedexpansion
 
 REM ============================================================
-REM  Sistema Cobros Agua - Inicio Silencioso
-REM  Mismo comportamiento que proyecto CELULAR:
+REM  SIGUA Local - Inicio Silencioso
 REM  - Sin ventana de terminal visible
+REM  - Inicia servidor Express + Vite automaticamente
 REM  - Navegador en modo App (ventana independiente, sin pestanas)
 REM ============================================================
 
@@ -14,7 +14,7 @@ cd /d "!PROJECT_DIR!"
 REM --- Verificar e instalar dependencias si es necesario ---
 if not exist "node_modules" goto INSTALL
 if not exist "node_modules\.bin\vite.cmd" goto INSTALL
-goto START_SERVER
+goto CHECK_DB
 
 :INSTALL
 echo Instalando dependencias, por favor espere...
@@ -26,24 +26,51 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:CHECK_DB
+REM --- Inicializar base de datos si no existe ---
+if not exist "server\cobros_agua.db" (
+    echo Inicializando base de datos local...
+    call node server/init-db.js
+    if errorlevel 1 (
+        echo [ERROR] No se pudo inicializar la base de datos.
+        pause
+        exit /b 1
+    )
+)
+
 :START_SERVER
-REM --- Lanzar npm run dev de forma SILENCIOSA (sin ventana visible) ---
-set "VBS_FILE=%TEMP%\run_cobros_agua.vbs"
+REM --- Lanzar servidor Express de forma SILENCIOSA ---
+set "VBS_SERVER=%TEMP%\run_cobros_server.vbs"
+
+(
+    echo Set objShell = CreateObject^("WScript.Shell"^)
+    echo strCommand = "cmd.exe /c cd /d ""!PROJECT_DIR!"" && node server/server.js"
+    echo objShell.Run strCommand, 0, False
+) > "!VBS_SERVER!"
+
+cscript.exe "!VBS_SERVER!" >nul 2>&1
+del "!VBS_SERVER!" >nul 2>&1
+
+REM --- Esperar a que el servidor Express arranque ---
+timeout /t 2 /nobreak >nul 2>&1
+
+REM --- Lanzar Vite de forma SILENCIOSA ---
+set "VBS_VITE=%TEMP%\run_cobros_vite.vbs"
 
 (
     echo Set objShell = CreateObject^("WScript.Shell"^)
     echo strCommand = "cmd.exe /c cd /d ""!PROJECT_DIR!"" && npm run dev"
     echo objShell.Run strCommand, 0, False
-) > "!VBS_FILE!"
+) > "!VBS_VITE!"
 
-cscript.exe "!VBS_FILE!" >nul 2>&1
-del "!VBS_FILE!" >nul 2>&1
+cscript.exe "!VBS_VITE!" >nul 2>&1
+del "!VBS_VITE!" >nul 2>&1
 
 REM --- Esperar a que Vite arranque ---
-timeout /t 6 /nobreak >nul 2>&1
+timeout /t 5 /nobreak >nul 2>&1
 
 REM --- Abrir en modo App (ventana independiente, sin pestanas de navegador) ---
-set "DATA_DIR=%USERPROFILE%\.cobros_agua_data"
+set "DATA_DIR=%USERPROFILE%\.cobros_agua_local_data"
 if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
 
 REM Intentar con Chrome
