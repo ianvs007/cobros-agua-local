@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
-import { Building2, Database, Download, CheckCircle2, Image as ImageIcon, Trash2, Shield, UserPlus, Edit2, KeyRound, Upload, FileSpreadsheet } from 'lucide-react';
+import { Building2, Database, Download, CheckCircle2, Image as ImageIcon, Trash2, Shield, UserPlus, Edit2, KeyRound, Upload, FileSpreadsheet, UploadCloud } from 'lucide-react';
 import { getConfiguracion, getOperadores } from '../services/data';
 import { useToast } from '../utils/toast';
 import Toast from '../utils/toast';
@@ -132,10 +132,151 @@ export default function Configuracion() {
         const { data: p } = await supabase.from('pagos').select('*');
         const { data: c } = await supabase.from('configuracion').select('*');
         const { data: o } = await supabase.from('operadores').select('*');
-        const file = { u, p, c, o, date: new Date().toISOString() };
+        const { data: a } = await supabase.from('anulaciones').select('*');
+        const { data: pa } = await supabase.from('pausas_cobro').select('*');
+        const { data: co } = await supabase.from('condonaciones').select('*');
+        const file = { u, p, c, o, a, pa, co, date: new Date().toISOString() };
         const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'RESPALDO_MAESTRO_CLOUD.json'; a.click();
+        const link = document.createElement('a'); link.href = url; link.download = 'RESPALDO_MAESTRO_LOCAL.json'; link.click();
+    };
+
+    const restore = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        e.target.value = '';
+
+        const confirm1 = window.confirm('⚠️ RESTAURAR RESPALDO\n\nEsto reemplazará TODOS los datos actuales con los del archivo de respaldo.\n\n- Usuarios\n- Pagos\n- Configuración\n- Operadores\n\n¿Estás seguro de continuar?');
+        if (!confirm1) return;
+
+        const confirm2 = window.confirm('⚠️ ÚLTIMA CONFIRMACIÓN\n\nLos datos actuales se perderán permanentemente.\nAsegúrate de haber exportado un respaldo antes.\n\n¿Confirmas la restauración?');
+        if (!confirm2) return;
+
+        try {
+            const text = await file.text();
+            const backup = JSON.parse(text);
+
+            if (!backup.u || !backup.p || !backup.c || !backup.o) {
+                notifyError('Archivo de respaldo inválido. Debe contener usuarios, pagos, configuración y operadores.');
+                return;
+            }
+
+            // 1. Limpiar todas las tablas en orden (dependencias)
+            await supabase.from('anulaciones').delete().not('id', 'is', null);
+            await supabase.from('condonaciones').delete().not('id', 'is', null);
+            await supabase.from('pausas_cobro').delete().not('id', 'is', null);
+            await supabase.from('pagos').delete().not('id', 'is', null);
+            await supabase.from('usuarios').delete().not('id', 'is', null);
+            await supabase.from('configuracion').delete().not('key', 'is', null);
+            await supabase.from('operadores').delete().not('id', 'is', null);
+
+            // 2. Restaurar operadores
+            if (backup.o && backup.o.length > 0) {
+                const ops = backup.o.map(({ id, created_at, ...rest }) => rest);
+                await supabase.from('operadores').insert(ops);
+            }
+
+            // 3. Restaurar configuración
+            if (backup.c && backup.c.length > 0) {
+                const configs = backup.c.map(({ created_at, ...rest }) => rest);
+                for (const cfg of configs) {
+                    await supabase.from('configuracion').upsert(cfg);
+                }
+            }
+
+            // 4. Restaurar usuarios
+            if (backup.u && backup.u.length > 0) {
+                const users = backup.u.map(({ id, created_at, ...rest }) => rest);
+                await supabase.from('usuarios').insert(users);
+            }
+
+            // 5. Restaurar pagos (necesitamos mapear usuario_id)
+            if (backup.p && backup.p.length > 0) {
+                // Obtener usuarios recién insertados para mapear IDs
+                const { data: newUsers } = await supabase.from('usuarios').select('id, codigo');
+                const oldUsers = backup.u || [];
+                const idMap = {};
+                for (const oldUser of oldUsers) {
+                    const newUser = (newUsers || []).find(nu => nu.codigo === oldUser.codigo);
+                    if (newUser) idMap[oldUser.id] = newUser.id;
+                }
+
+                const pagos = backup.p
+                    .map(({ id, created_at, ...rest }) => ({
+                        ...rest,
+                        usuario_id: idMap[rest.usuario_id] || rest.usuario_id
+                    }))
+                    .filter(p => p.usuario_id);
+
+                if (pagos.length > 0) {
+                    // Insertar en lotes de 50
+                    for (let i = 0; i < pagos.length; i += 50) {
+                        await supabase.from('pagos').insert(pagos.slice(i, i + 50));
+                    }
+                }
+            }
+
+            // 6. Restaurar anulaciones si existen en el respaldo
+            if (backup.a && backup.a.length > 0) {
+                const { data: newUsers } = await supabase.from('usuarios').select('id, codigo');
+                const oldUsers = backup.u || [];
+                const idMap = {};
+                for (const oldUser of oldUsers) {
+                    const newUser = (newUsers || []).find(nu => nu.codigo === oldUser.codigo);
+                    if (newUser) idMap[oldUser.id] = newUser.id;
+                }
+                const anulaciones = backup.a.map(({ id, created_at, ...rest }) => ({
+                    ...rest,
+                    usuario_id: idMap[rest.usuario_id] || rest.usuario_id
+                }));
+                for (let i = 0; i < anulaciones.length; i += 50) {
+                    await supabase.from('anulaciones').insert(anulaciones.slice(i, i + 50));
+                }
+            }
+
+            // 7. Restaurar pausas si existen
+            if (backup.pa && backup.pa.length > 0) {
+                const { data: newUsers } = await supabase.from('usuarios').select('id, codigo');
+                const oldUsers = backup.u || [];
+                const idMap = {};
+                for (const oldUser of oldUsers) {
+                    const newUser = (newUsers || []).find(nu => nu.codigo === oldUser.codigo);
+                    if (newUser) idMap[oldUser.id] = newUser.id;
+                }
+                const pausas = backup.pa.map(({ id, created_at, ...rest }) => ({
+                    ...rest,
+                    usuario_id: idMap[rest.usuario_id] || rest.usuario_id
+                }));
+                for (let i = 0; i < pausas.length; i += 50) {
+                    await supabase.from('pausas_cobro').insert(pausas.slice(i, i + 50));
+                }
+            }
+
+            // 8. Restaurar condonaciones si existen
+            if (backup.co && backup.co.length > 0) {
+                const { data: newUsers } = await supabase.from('usuarios').select('id, codigo');
+                const oldUsers = backup.u || [];
+                const idMap = {};
+                for (const oldUser of oldUsers) {
+                    const newUser = (newUsers || []).find(nu => nu.codigo === oldUser.codigo);
+                    if (newUser) idMap[oldUser.id] = newUser.id;
+                }
+                const condonaciones = backup.co.map(({ id, created_at, ...rest }) => ({
+                    ...rest,
+                    usuario_id: idMap[rest.usuario_id] || rest.usuario_id
+                }));
+                for (let i = 0; i < condonaciones.length; i += 50) {
+                    await supabase.from('condonaciones').insert(condonaciones.slice(i, i + 50));
+                }
+            }
+
+            success('Respaldo restaurado exitosamente. Se recomienda recargar el sistema.');
+            load();
+            loadOperadores();
+        } catch (err) {
+            console.error('Error al restaurar:', err);
+            notifyError('Error al restaurar el respaldo: ' + (err.message || 'Formato inválido'));
+        }
     };
 
     const resetProduccion = async () => {
@@ -397,11 +538,20 @@ export default function Configuracion() {
                 </h2>
                 <div className="space-y-6 relative z-10">
                     <p className="text-[11px] font-bold text-slate-400 leading-relaxed uppercase tracking-tight">
-                        Se recomienda exportar una copia de seguridad semanalmente. El archivo contiene todos los socios y pagos actuales.
+                        Se recomienda exportar una copia de seguridad semanalmente. El archivo contiene todos los datos del sistema.
                     </p>
-                    <button onClick={backup} className="w-full bg-emerald-50 hover:bg-emerald-600 text-emerald-600 hover:text-white border border-emerald-100 font-black p-5 rounded-[2rem] text-[11px] uppercase flex items-center justify-center gap-3 transition-all shadow-sm hover:shadow-xl hover:shadow-emerald-500/20 active:scale-95">
-                        <Download size={18} /> Exportar Respaldo Maestro (.JSON)
-                    </button>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <button onClick={backup} className="w-full bg-emerald-50 hover:bg-emerald-600 text-emerald-600 hover:text-white border border-emerald-100 font-black p-5 rounded-[2rem] text-[11px] uppercase flex items-center justify-center gap-3 transition-all shadow-sm hover:shadow-xl hover:shadow-emerald-500/20 active:scale-95">
+                            <Download size={18} /> Exportar Respaldo
+                        </button>
+                        <label className="w-full cursor-pointer bg-amber-50 hover:bg-amber-600 text-amber-600 hover:text-white border border-amber-100 font-black p-5 rounded-[2rem] text-[11px] uppercase flex items-center justify-center gap-3 transition-all shadow-sm hover:shadow-xl hover:shadow-amber-500/20 active:scale-95">
+                            <UploadCloud size={18} /> Restaurar Respaldo
+                            <input type="file" className="hidden" accept=".json" onChange={restore} />
+                        </label>
+                    </div>
+                    <p className="text-[8px] font-bold text-slate-400 text-center">
+                        ⚠️ La restauración reemplaza TODOS los datos actuales - Requiere doble confirmación
+                    </p>
                 </div>
             </div>
 
